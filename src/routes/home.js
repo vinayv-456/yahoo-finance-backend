@@ -2,61 +2,76 @@ const express = require("express");
 const router = express.Router();
 var yahooFinance = require("yahoo-finance");
 const bodyParser = require("body-parser");
+const {companies: allCompanies} = require("../constants/companies");
+const {
+  getCompaniesData,
+  getCompaniesMeetingCondition,
+} = require("../utilities/contituents");
 
 router.use(bodyParser.json());
 router.post("/contituents", async (req, res) => {
   try {
-    const {companies} = req.body;
-    console.log("testttt", req.body.companies);
-    yahooFinance.quote(
-      {
-        symbols: companies,
-        modules: [
-          "price",
-          // "summaryDetail",
-          "financialData",
-        ],
-      },
-      function (err, quote) {
-        const data = companies.reduce((overall, company) => {
-          const details = quote[company];
-          const {price, summaryDetail, financialData} = details;
-          console.log("det", price);
-          return [
-            ...overall,
-            {
-              company: price?.shortName,
-              symbol: price?.symbol,
-              exchange: price?.exchangeName,
-              price: price?.regularMarketPrice,
-              revenueGrowth: financialData?.revenueGrowth,
-              ebitdaMargins: financialData?.ebitdaMargins,
-              grossMargins: financialData?.grossMargins,
-            },
-          ];
-        }, []);
-        // data.push({
-        //   company: quote.price.shortName,
-        //   symbol: quote.price.symbol,
-        //   exchange: quote.price.exchangeName,
-        //   price: quote.price.regularMarketPrice,
-        //   currency: quote.price.currency,
-        //   dividendRate: quote.price.dividendRate,
-        //   dividendYield: quote.price.dividendYield,
-        //   exDividendDate: quote.price.exDividendDate,
-        // });
+    const {pageSize, marketCap, startIndexInit} = req.body;
+    const allModules = [
+      "price",
+      // "summaryDetail",
+      "financialData",
+    ];
+    if (!marketCap) {
+      const startIndex = startIndexInit || 0;
+      const endIndex = startIndex + pageSize;
+      console.log("startIndex", startIndex, endIndex);
+      const companies = allCompanies.slice(startIndex, endIndex);
+      console.log("fetching........", companies);
+      const resp = await getCompaniesData({
+        companies,
+        modules: allModules,
+        countRequired: pageSize,
+      });
+      console.log("response sent......");
+      res.status(200).send({
+        ...resp,
+        indexStart: startIndex,
+        hasPrevPage: startIndex > 0,
+        indexReached: endIndex,
+        hasNextPage: allCompanies.length > endIndex,
+      });
+      // res.send({});
+    } else {
+      const condition = (val) => val > marketCap * 1000000000;
+      const {data: partialData, indexReached} =
+        await getCompaniesMeetingCondition({
+          condition,
+          startIndexInit,
+          pageSize,
+          modules: ["price"],
+        });
+      console.log("=====finalized companies=========");
+      if (partialData) {
+        console.log("aaa", Object.keys(partialData));
 
-        // console.log(err, "erroe");
-        // console.log(quote, "queto");
-        // res.write(JSON.stringify(quote)); //write a response to the clients
-        // res.write({});
-        // res.end();
-        res.status(200).send(data);
+        const data = await getCompaniesData({
+          companies: Object.keys(partialData || {})?.slice(0, pageSize),
+          modules: allModules.slice(0),
+        });
+        console.log("indexReached===22222", indexReached);
+        res.status(200).send({
+          ...data,
+          indexStart: startIndexInit || 0,
+          hasPrevPage: startIndexInit > 0,
+          indexReached,
+          hasNextPage: Object.keys(partialData).length > pageSize,
+        });
+      } else {
+        res.status(200).send({});
       }
-    );
+      // console.log("data", data);
+    }
   } catch (e) {
     console.log("err", e);
+    res.status(400).send({});
     // res.send(createResponse(true, null, e.message));
   }
 });
 module.exports = router;
+// aaa [ 'ME', 'ALHC', 'MDRX', 'AMLX', 'AAPL' ]
